@@ -445,6 +445,8 @@
         self.el.className = 'pika-single' + (opts.isRTL ? ' is-rtl' : '');
 
         addEvent(self.el, 'mousedown', self._onMouseDown, true);
+        //Fixing event issue on IOS7. see https://github.com/dbushell/Pikaday/issues/101
+        addEvent(self.el, 'touchstart', self._onMouseDown, true);
         addEvent(self.el, 'change', self._onChange);
 
         if (opts.field) {
