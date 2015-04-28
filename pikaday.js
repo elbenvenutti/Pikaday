@@ -1,27 +1,32 @@
 /*!
  * Pikaday
  *
- * Copyright © 2013 David Bushell | BSD & MIT license | https://github.com/dbushell/Pikaday
+ * Copyright © 2014 David Bushell | BSD & MIT license | https://github.com/dbushell/Pikaday
  */
 
-(function (root, define, factory)
+(function (root, factory)
 {
     'use strict';
 
-    if (typeof define === 'function' && define.amd) {
+    var moment;
+    if (typeof exports === 'object') {
+        // CommonJS module
+        // Load moment.js as an optional dependency
+        try { moment = require('moment'); } catch (e) {}
+        module.exports = factory(moment);
+    } else if (typeof define === 'function' && define.amd) {
         // AMD. Register as an anonymous module.
         define(function (req)
         {
             // Load moment.js as an optional dependency
             var id = 'moment';
-            var moment = req.defined && req.defined(id) ? req(id) : undefined;
-            return factory(moment || root.moment);
+            moment = req.defined && req.defined(id) ? req(id) : undefined;
+            return factory(moment);
         });
     } else {
-        // Browser global
         root.Pikaday = factory(root.moment);
     }
-}(window, window.define, function (moment)
+}(this, function (moment)
 {
     'use strict';
 
@@ -161,6 +166,10 @@
         // automatically show/hide the picker on `field` focus (default `true` if `field` is set)
         bound: undefined,
 
+        // position of the datepicker, relative to the field (default to bottom & left)
+        // ('bottom' & 'left' keywords are not used, 'top' & 'right' are modifier on the bottom/left position)
+        position: 'bottom left',
+
         // the default output format for `.toString()` and `field` value
         format: 'YYYY-MM-DD',
 
@@ -188,6 +197,12 @@
         maxMonth: undefined,
 
         isRTL: false,
+
+        // Additional text to append to the year in the calendar title
+        yearSuffix: '',
+
+        // Render the month after year in the calendar title
+        showMonthAfterYear: false,
 
         // how many months are visible (not implemented yet)
         numberOfMonths: 1,
@@ -267,6 +282,8 @@
             isMinYear = year === opts.minYear,
             isMaxYear = year === opts.maxYear,
             html = '<div class="pika-title">',
+            monthHtml,
+            yearHtml,
             prev = true,
             next = true;
 
@@ -276,7 +293,7 @@
                 ((isMinYear && i < opts.minMonth) || (isMaxYear && i > opts.maxMonth) ? 'disabled' : '') + '>' +
                 opts.i18n.months[i] + '</option>');
         }
-        html += '<div class="pika-label">' + opts.i18n.months[month] + '<select class="pika-select pika-select-month">' + arr.join('') + '</select></div>';
+        monthHtml = '<div class="pika-label">' + opts.i18n.months[month] + '<select class="pika-select pika-select-month">' + arr.join('') + '</select></div>';
 
         if (isArray(opts.yearRange)) {
             i = opts.yearRange[0];
@@ -291,7 +308,13 @@
                 arr.push('<option value="' + i + '"' + (i === year ? ' selected': '') + '>' + (i) + '</option>');
             }
         }
-        html += '<div class="pika-label">' + year + '<select class="pika-select pika-select-year">' + arr.join('') + '</select></div>';
+        yearHtml = '<div class="pika-label">' + year + opts.yearSuffix + '<select class="pika-select pika-select-year">' + arr.join('') + '</select></div>';
+
+        if (opts.showMonthAfterYear) {
+            html += yearHtml + monthHtml;
+        } else {
+            html += monthHtml + yearHtml;
+        }
 
         if (isMinYear && (month === 0 || opts.minMonth >= month)) {
             prev = false;
@@ -436,7 +459,7 @@
                 }
             }
             while ((pEl = pEl.parentNode));
-            if (self._v && target !== opts.field) {
+            if (self._v && target !== opts.trigger) {
                 self.hide();
             }
         };
@@ -482,9 +505,9 @@
         if (opts.bound) {
             this.hide();
             self.el.className += ' is-bound';
-            addEvent(opts.field, 'click', self._onInputClick);
-            addEvent(opts.field, 'focus', self._onInputFocus);
-            addEvent(opts.field, 'blur', self._onInputBlur);
+            addEvent(opts.trigger, 'click', self._onInputClick);
+            addEvent(opts.trigger, 'focus', self._onInputFocus);
+            addEvent(opts.trigger, 'blur', self._onInputBlur);
         } else {
             this.show();
         }
@@ -514,6 +537,8 @@
             opts.field = (opts.field && opts.field.nodeName) ? opts.field : null;
 
             opts.bound = !!(opts.bound !== undefined ? opts.field && opts.bound : opts.field);
+
+            opts.trigger = (opts.trigger && opts.trigger.nodeName) ? opts.trigger : opts.field;
 
             var nom = parseInt(opts.numberOfMonths, 10) || 1;
             opts.numberOfMonths = nom > 4 ? 4 : nom;
@@ -571,10 +596,10 @@
         /**
          * set the current selection from a Moment.js object (if available)
          */
-        setMoment: function(date)
+        setMoment: function(date, preventOnSelect)
         {
             if (hasMoment && moment.isMoment(date)) {
-                this.setDate(date.toDate());
+                this.setDate(date.toDate(), preventOnSelect);
             }
         },
 
@@ -728,17 +753,12 @@
             this.el.innerHTML = renderTitle(this) + this.render(this._y, this._m);
 
             if (opts.bound) {
-                var pEl  = opts.field,
-                    left = pEl.offsetLeft,
-                    top  = pEl.offsetTop + pEl.offsetHeight;
-                while((pEl = pEl.offsetParent)) {
-                    left += pEl.offsetLeft;
-                    top  += pEl.offsetTop;
+                this.adjustPosition();
+                if(opts.field.type !== 'hidden') {
+                    sto(function() {
+                        opts.trigger.focus();
+                    }, 1);
                 }
-                this.el.style.cssText = 'position:absolute;left:' + left + 'px;top:' + top + 'px;';
-                sto(function() {
-                    opts.field.focus();
-                }, 1);
             }
 
             if (typeof this._o.onDraw === 'function') {
@@ -747,6 +767,52 @@
                     self._o.onDraw.call(self);
                 }, 0);
             }
+        },
+
+        adjustPosition: function()
+        {
+            var field = this._o.trigger, pEl = field,
+            width = this.el.offsetWidth, height = this.el.offsetHeight,
+            viewportWidth = window.innerWidth || document.documentElement.clientWidth,
+            viewportHeight = window.innerHeight || document.documentElement.clientHeight,
+            scrollTop = window.pageYOffset || document.body.scrollTop || document.documentElement.scrollTop,
+            left, top, clientRect;
+
+            if (typeof field.getBoundingClientRect === 'function') {
+                clientRect = field.getBoundingClientRect();
+                left = clientRect.left + window.pageXOffset;
+                top = clientRect.bottom + window.pageYOffset;
+            } else {
+                left = pEl.offsetLeft;
+                top  = pEl.offsetTop + pEl.offsetHeight;
+                while((pEl = pEl.offsetParent)) {
+                    left += pEl.offsetLeft;
+                    top  += pEl.offsetTop;
+                }
+            }
+
+            // default position is bottom & left
+            if (left + width > viewportWidth ||
+                (
+                    this._o.position.indexOf('right') > -1 &&
+                    left - width + field.offsetWidth > 0
+                )
+            ) {
+                left = left - width + field.offsetWidth;
+            }
+            if (top + height > viewportHeight + scrollTop ||
+                (
+                    this._o.position.indexOf('top') > -1 &&
+                    top - height - field.offsetHeight > 0
+                )
+            ) {
+                top = top - height - field.offsetHeight;
+            }
+            this.el.style.cssText = [
+                'position: absolute',
+                'left: ' + left + 'px',
+                'top: ' + top + 'px'
+            ].join(';');
         },
 
         /**
@@ -839,9 +905,9 @@
             if (this._o.field) {
                 removeEvent(this._o.field, 'change', this._onInputChange);
                 if (this._o.bound) {
-                    removeEvent(this._o.field, 'click', this._onInputClick);
-                    removeEvent(this._o.field, 'focus', this._onInputFocus);
-                    removeEvent(this._o.field, 'blur', this._onInputBlur);
+                    removeEvent(this._o.trigger, 'click', this._onInputClick);
+                    removeEvent(this._o.trigger, 'focus', this._onInputFocus);
+                    removeEvent(this._o.trigger, 'blur', this._onInputBlur);
                 }
             }
             if (this.el.parentNode) {
